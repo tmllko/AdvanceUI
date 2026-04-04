@@ -1,4 +1,4 @@
-﻿let entries = [];
+let entries = [];
 let editingId = null;
 let deletingId = null;
 let activeFilter = 'ALL';
@@ -354,7 +354,7 @@ function switchTab(mode) {
     document.body.classList.remove('mode-management', 'mode-about');
     document.body.classList.add('mode-ai');
     document.getElementById('tab-ai').classList.add('active');
-    updateKeyIndicator();
+    if (!pdfLoaded) initPDF();
   } else {
     currentMode = 'dashboard';
     document.body.classList.remove('mode-management', 'mode-about', 'mode-ai');
@@ -595,80 +595,14 @@ async function init() {
 }
 init();
 
-// ── AI PDF ASSISTANT ─────────────────────────────────────────────────────
-const GEMINI_API_KEYS = [
-  atob('QUl6YVN5Qy1jRVNkUFU5dEpaNi16SUljd0VKTVBzVzMtQXQ1M1I0'),
-  atob('QUl6YVN5RFZLcUEzSU91eFcyeXF1encxUjg2ZlVoZTlHbDdpQ3lN')
-  // atob('QUl6YVN5QXVLQjRTZ3dYUGx5R213eUx4RmVVTXpkTm9sSm1RdVdr'),
-  // atob('QUl6YVN5Qmc5ekdUZUFNOHh0bTNsTWNOZnlWN3Ayd0hCT3FxSWc4')
-];
-
-let currentKeyIndex = 0;
-let keyCooldowns = {};
-
-function getCurrentAPIKey() {
-  return GEMINI_API_KEYS[currentKeyIndex];
-}
-
-function getAPIUrl() {
-  return `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getCurrentAPIKey()}`;
-}
-
-function updateKeyIndicator() {
-  const el = document.getElementById('apiKeyIndicator');
-  if (!el) return;
-  const total = GEMINI_API_KEYS.length;
-  const dots = Array.from({ length: total }, (_, i) => {
-    const cooldown = keyCooldowns[i] && Date.now() < keyCooldowns[i];
-    const active = i === currentKeyIndex;
-    const color = cooldown ? 'var(--fault)' : active ? 'var(--safe)' : 'var(--border2)';
-    return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin:0 2px;transition:all 0.3s" title="Key ${i + 1}${active ? ' (active)' : ''}${cooldown ? ' (rate limited)' : ''}"></span>`;
-  }).join('');
-  el.innerHTML = `KEY ${currentKeyIndex + 1}/${total} ${dots}`;
-}
-
-function switchToNextKey() {
-  for (let i = 1; i < GEMINI_API_KEYS.length; i++) {
-    const nextIndex = (currentKeyIndex + i) % GEMINI_API_KEYS.length;
-    if (!keyCooldowns[nextIndex] || Date.now() > keyCooldowns[nextIndex]) {
-      currentKeyIndex = nextIndex;
-      updateKeyIndicator();
-      return true;
-    }
-  }
-  return false;
-}
-
+// ── LOCAL SEARCH ASSISTANT ────────────────────────────────────────────────
 let pdfText = '';
 let pdfPages = [];
 let pdfLoaded = false;
-let isAiThinking = false;
-let lastRequestTime = 0;
-const REQUEST_COOLDOWN = 2000;
-let usePdfContext = false;
+let isSearching = false;
 
-function togglePdfContext() {
-  usePdfContext = !usePdfContext;
-  const btn = document.getElementById('pdfToggleBtn');
-  if (btn) {
-    btn.textContent = `📖 PDF: ${usePdfContext ? 'ON' : 'OFF'}`;
-    btn.style.background = usePdfContext ? 'var(--safe)' : 'var(--warn)';
-  }
-  if (usePdfContext && !pdfLoaded) {
-    loadPDF();
-  }
-}
-if (usePdfContext && !pdfLoaded) {
-  loadPDF();
-}
-
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-// ── LOAD PDF (embedded base64, no CORS) ──────────────────────────────────
 async function loadPDF() {
-  if (pdfLoaded) return;
-  setAiStatus('LOADING', true);
+  if (pdfLoaded) return true;
   try {
     const binary = atob(PDF_BASE64);
     const bytes = new Uint8Array(binary.length);
@@ -677,40 +611,163 @@ async function loadPDF() {
     const totalPages = pdfDoc.numPages;
     pdfPages = [];
     let fullText = '';
+
     for (let i = 1; i <= totalPages; i++) {
       const page = await pdfDoc.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map(item => item.str).join(' ');
+      const items = content.items;
+
+      if (items.length === 0) {
+        pdfPages.push({ page: i, text: '' });
+        fullText += `\n--- PAGE ${i} ---\n`;
+        continue;
+      }
+
+      const scale = 2;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: context, viewport }).promise;
+
+      const pageWidth = viewport.width;
+      const leftMargin = pageWidth * 0.02;
+      const rightMargin = pageWidth * 0.98;
+      const centerLine = pageWidth * 0.5;
+
+      const leftItems = [];
+      const rightItems = [];
+
+      items.forEach(item => {
+        const x = item.transform[4] * scale;
+        const y = item.transform[5] * scale;
+        if (x < centerLine) {
+          leftItems.push({ text: item.str.trim(), x, y });
+        } else {
+          rightItems.push({ text: item.str.trim(), x, y });
+        }
+      });
+
+      const sortByPos = (a, b) => {
+        const yDiff = Math.abs(b.y - a.y);
+        if (yDiff > 10) return b.y - a.y;
+        return a.x - b.x;
+      };
+
+      leftItems.sort(sortByPos);
+      rightItems.sort(sortByPos);
+
+      let pageText = `--- PAGE ${i} ---\n`;
+
+      const maxRows = Math.max(leftItems.length, rightItems.length);
+      const leftGrouped = groupByRow(leftItems, 15);
+      const rightGrouped = groupByRow(rightItems, 15);
+
+      const maxGroups = Math.max(leftGrouped.length, rightGrouped.length);
+      for (let g = 0; g < maxGroups; g++) {
+        const left = leftGrouped[g] ? leftGrouped[g].join(' ') : '';
+        const right = rightGrouped[g] ? rightGrouped[g].join(' ') : '';
+        if (left || right) {
+          pageText += left + (right ? ' | ' + right : '') + '\n';
+        }
+      }
+
       pdfPages.push({ page: i, text: pageText });
-      fullText += `\n--- PAGE ${i} ---\n` + pageText;
+      fullText += pageText;
     }
+
     pdfText = fullText.trim();
     pdfLoaded = true;
-    setAiStatus('READY', false);
+    return true;
   } catch (err) {
     console.error('PDF Load Error:', err);
-    setAiStatus('ERROR', false);
+    return false;
   }
 }
 
-// ── SMART RETRIEVAL (keyword-scored page ranking) ─────────────────────────
-// Instead of dumping 20k chars, find the 3 most relevant pages (~3k chars)
-function getRelevantContext(question) {
+function groupByRow(items, yThreshold) {
+  const groups = [];
+  let currentGroup = [];
+  let lastY = null;
+
+  items.forEach(item => {
+    if (lastY === null || Math.abs(item.y - lastY) <= yThreshold) {
+      currentGroup.push(item);
+    } else {
+      if (currentGroup.length) groups.push(currentGroup);
+      currentGroup = [item];
+    }
+    lastY = item.y;
+  });
+
+  if (currentGroup.length) groups.push(currentGroup);
+  return groups;
+}
+
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+async function initPDF() {
+  const loaded = await loadPDF();
+  if (loaded) {
+    setAiStatus('READY', false);
+    const faults = extractFaultsFromPDF();
+    showToast(`PDF Loaded: ${faults.length} faults found`, 'var(--safe)');
+  } else {
+    setAiStatus('PDF ERROR', false);
+  }
+}
+
+// ── LOCAL SEARCH FUNCTIONS ─────────────────────────────────────────────────
+function extractKeywords(question) {
   const stopWords = new Set([
     'what', 'is', 'are', 'the', 'a', 'an', 'how', 'to', 'do', 'does', 'in', 'of',
-    'for', 'and', 'or', 'with', 'can', 'why', 'which', 'when', 'where', 'my', 'its', 'any', 'all'
+    'for', 'and', 'or', 'with', 'can', 'why', 'which', 'when', 'where', 'my', 'its', 'any', 'all',
+    'i', 'me', 'you', 'we', 'they', 'it', 'this', 'that', 'be', 'have', 'has', 'had', 'not', 
+    'but', 'if', 'then', 'so', 'just', 'need', 'want', 'know', 'tell', 'about', 'from', 'on'
   ]);
-  const keywords = question.toLowerCase()
-    .replace(/[^a-z0-9 ]/g, '')
+  return question.toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
     .split(' ')
     .filter(w => w.length > 2 && !stopWords.has(w));
+}
 
-  // No keywords or no pages — send first 4000 chars as fallback
-  if (!keywords.length || !pdfPages.length) {
-    return pdfText.substring(0, 4000) + (pdfText.length > 4000 ? '\n...[truncated]' : '');
-  }
+function scoreEntry(entry, keywords) {
+  let score = 0;
+  const titleLower = (entry.title || '').toLowerCase();
+  const codeLower = (entry.code || '').toLowerCase();
+  const reasonsText = (entry.reasons || []).join(' ').toLowerCase();
+  const stepsText = (entry.steps || []).join(' ').toLowerCase();
+  const noteText = (entry.note || '').toLowerCase();
 
-  // Score each page by keyword frequency
+  keywords.forEach(kw => {
+    score += (titleLower.match(new RegExp(kw, 'g')) || []).length * 5;
+    score += (codeLower.match(new RegExp(kw, 'g')) || []).length * 10;
+    score += (reasonsText.match(new RegExp(kw, 'g')) || []).length * 3;
+    score += (stepsText.match(new RegExp(kw, 'g')) || []).length * 2;
+    score += (noteText.match(new RegExp(kw, 'g')) || []).length * 2;
+  });
+
+  return score;
+}
+
+function searchEntries(keywords) {
+  if (!keywords.length) return [];
+  
+  const results = entries.map(entry => ({
+    entry,
+    score: scoreEntry(entry, keywords)
+  })).filter(r => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+  
+  return results;
+}
+
+function searchPDF(keywords) {
+  if (!keywords.length || !pdfPages.length) return [];
+  
   const scored = pdfPages.map(p => {
     const t = p.text.toLowerCase();
     const score = keywords.reduce((s, kw) => {
@@ -719,26 +776,108 @@ function getRelevantContext(question) {
     return { ...p, score };
   });
 
-  const top = scored.sort((a, b) => b.score - a.score).slice(0, 3);
+  return scored.sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .filter(p => p.score > 0);
+}
 
-  // No hits at all — fall back to first 4000 chars
-  if (top[0].score === 0) {
-    return pdfText.substring(0, 4000) + '\n...[showing intro section]';
+function formatEntryResult(entry) {
+  const typeLabel = entry.type === 'FAULT' ? 'FAULT' : 'WARNING';
+  const reasons = (entry.reasons || []).map(r => `• ${escapeHTML(r)}`).join('\n');
+  const steps = (entry.steps || []).map((s, i) => `${i + 1}. ${escapeHTML(s)}`).join('\n');
+  
+  let html = `<div class="result-card type-${entry.type}">`;
+  html += `<div class="result-header"><span class="result-type">${typeLabel}</span>`;
+  html += `<span class="result-code">${escapeHTML(entry.code)}</span>`;
+  html += `<span class="result-title">${escapeHTML(entry.title)}</span></div>`;
+  
+  if (reasons) html += `<div class="result-section"><strong>Why it happens:</strong>\n${reasons}</div>`;
+  if (steps) html += `<div class="result-section"><strong>How to fix:</strong>\n${steps}</div>`;
+  if (entry.note) html += `<div class="result-note">⚠️ ${escapeHTML(entry.note)}</div>`;
+  
+  html += `</div>`;
+  return html;
+}
+
+function formatPDFResult(pages) {
+  let html = `<div class="result-pdf-section">`;
+  html += `<div class="result-pdf-header">📄 PDF Manual Results</div>`;
+  
+  pages.forEach(p => {
+    const lines = p.text.split('\n').slice(0, 25);
+    const text = lines.join('\n');
+    
+    const formattedText = lines.map(line => {
+      if (line.startsWith('---')) {
+        return `<strong>${escapeHTML(line)}</strong>`;
+      }
+      if (line.includes('|')) {
+        const parts = line.split('|');
+        const left = escapeHTML(parts[0].trim());
+        const right = escapeHTML(parts.slice(1).join('|').trim());
+        return `<div class="pdf-row"><span class="pdf-left">${left}</span><span class="pdf-right">${right}</span></div>`;
+      }
+      return escapeHTML(line);
+    }).join('<br>');
+    
+    html += `<div class="result-pdf-page">`;
+    html += `<div class="result-pdf-label">Page ${p.page}</div>`;
+    html += `<div class="result-pdf-text">${formattedText}</div>`;
+    html += `</div>`;
+  });
+  
+  html += `</div>`;
+  return html;
+}
+
+function localSearch(question) {
+  const keywords = extractKeywords(question);
+  
+  const entryResults = searchEntries(keywords);
+  const pdfResults = searchPDF(keywords);
+  
+  if (!entryResults.length && !pdfResults.length) {
+    return `<div class="search-no-results">
+      <div class="no-results-icon">🔍</div>
+      <div class="no-results-title">No matching data found</div>
+      <div class="no-results-sub">Try different keywords or check spelling</div>
+      <div class="no-results-help">
+        <strong>Search Tips:</strong><br>
+        • Use fault codes like "1805" or "0819"<br>
+        • Search by symptom: "pressure", "compressor", "sensor"<br>
+        • Try partial words: "press" finds "pressure"
+      </div>
+      <div class="no-results-dev">
+        <span>Developed by <strong>GOVIND KUMAR (DET)</strong></span><br>
+        <span>Tata Motors Lucknow Plant | Assembly Line 2 & 3</span>
+      </div>
+    </div>`;
   }
-
-  // Return top pages in document order
-  return top
-    .sort((a, b) => a.page - b.page)
-    .map(p => `--- PAGE ${p.page} ---\n${p.text}`)
-    .join('\n\n');
+  
+  let html = '';
+  
+  if (entryResults.length) {
+    html += `<div class="result-entries-section">`;
+    html += `<div class="result-section-header">📋 Matching Faults/Warnings (${entryResults.length})</div>`;
+    entryResults.forEach(r => {
+      html += formatEntryResult(r.entry);
+    });
+    html += `</div>`;
+  }
+  
+  if (pdfResults.length) {
+    html += formatPDFResult(pdfResults);
+  }
+  
+  return html;
 }
 
 function setAiStatus(text, pulse) {
   document.getElementById('aiStatusText').textContent = text;
   const dot = document.querySelector('.ai-dot');
   if (text === 'READY') { dot.style.background = 'var(--safe)'; dot.style.boxShadow = '0 0 8px var(--safe)'; }
-  else if (text === 'THINKING') { dot.style.background = 'var(--warn)'; dot.style.boxShadow = '0 0 8px var(--warn)'; }
-  else if (text === 'ERROR') { dot.style.background = 'var(--fault)'; dot.style.boxShadow = '0 0 8px var(--fault)'; }
+  else if (text === 'SEARCHING' || text === 'LOADING PDF') { dot.style.background = 'var(--warn)'; dot.style.boxShadow = '0 0 8px var(--warn)'; }
+  else if (text === 'ERROR' || text === 'PDF ERROR') { dot.style.background = 'var(--fault)'; dot.style.boxShadow = '0 0 8px var(--fault)'; }
   else if (text === 'LOADING') { dot.style.background = 'var(--warn)'; dot.style.boxShadow = '0 0 8px var(--warn)'; }
   else { dot.style.background = 'var(--accent)'; dot.style.boxShadow = '0 0 8px var(--accent)'; }
 }
@@ -747,15 +886,15 @@ function showWelcomeLoaded() {
   const chatArea = document.getElementById('aiChatArea');
   const welcome = chatArea.querySelector('.ai-welcome');
   if (welcome) {
-    welcome.querySelector('.ai-welcome-title').textContent = 'READY TO HELP';
-    welcome.querySelector('.ai-welcome-sub').innerHTML = 'Ask about AC machine faults, warnings, and troubleshooting.<br><br><small style="color:var(--accent);">Developed by <a href="mailto:gkk468971@tatamotors.com" style="color:inherit;font-weight:bold;text-decoration:none;">GOVIND KUMAR</a> | TATA MOTORS</small>';
+    welcome.querySelector('.ai-welcome-title').textContent = 'SEARCH READY';
+    welcome.querySelector('.ai-welcome-sub').innerHTML = 'Search AC machine faults, codes, and troubleshooting manual.<br><br><small style="color:var(--accent);">Developed by <a href="mailto:gkk468971@tatamotors.com" style="color:inherit;font-weight:bold;text-decoration:none;">GOVIND KUMAR</a> | TATA MOTORS</small>';
     welcome.querySelector('.ai-suggestions').style.display = 'flex';
   }
 }
 
 function useSuggestion(btn) {
   document.getElementById('aiQuestion').value = btn.textContent;
-  askAI();
+  performSearch();
 }
 
 function addChatMessage(role, text) {
@@ -787,134 +926,183 @@ function addChatMessage(role, text) {
   return msg;
 }
 
-// ── AI RESPONSE CACHE (localStorage) ─────────────────────────────────────
-const AI_CACHE_KEY = 'ac_ai_cache_v1';
-function getCachedAnswer(q) {
-  try { const c = JSON.parse(localStorage.getItem(AI_CACHE_KEY) || '{}'); return c[q.trim().toLowerCase()] || null; }
-  catch { return null; }
-}
-function setCachedAnswer(q, ans) {
-  try {
-    const c = JSON.parse(localStorage.getItem(AI_CACHE_KEY) || '{}');
-    const key = q.trim().toLowerCase();
-    c[key] = ans;
-    const keys = Object.keys(c);
-    if (keys.length > 50) delete c[keys[0]];
-    localStorage.setItem(AI_CACHE_KEY, JSON.stringify(c));
-  } catch { /* storage full */ }
-}
-
-// ── ASK AI ────────────────────────────────────────────────────────────────
-async function askAI() {
+// ── LOCAL SEARCH ───────────────────────────────────────────────────────────
+async function performSearch() {
   const input = document.getElementById('aiQuestion');
   const sendBtn = document.getElementById('aiSendBtn');
   const question = input.value.trim();
-  if (!question || isAiThinking) return;
+  if (!question || isSearching) return;
 
-  if (usePdfContext && !pdfLoaded) {
-    showToast('📖 Loading PDF... please wait', 'var(--warn)');
-    loadPDF().then(() => {
-      if (pdfLoaded) askAI();
-    });
-    return;
+  if (!pdfLoaded) {
+    setAiStatus('LOADING PDF', true);
+    await loadPDF();
   }
 
-  const now = Date.now();
-  if (now - lastRequestTime < REQUEST_COOLDOWN) {
-    const wait = Math.ceil((REQUEST_COOLDOWN - (now - lastRequestTime)) / 1000);
-    showToast(`⏳ Wait ${wait}s`, 'var(--warn)');
-    return;
-  }
-  lastRequestTime = now;
-
-  const cached = getCachedAnswer(question);
-  if (cached) {
-    input.value = '';
-    addChatMessage('user', question);
-    setTimeout(() => { addChatMessage('ai', cached); setAiStatus('READY', false); }, 200);
-    return;
-  }
-
-  isAiThinking = true;
+  isSearching = true;
   input.value = '';
   sendBtn.disabled = true;
   sendBtn.innerHTML = '<span style="font-size:12px">...</span>';
-  setAiStatus('THINKING', true);
+  setAiStatus('SEARCHING', true);
   addChatMessage('user', question);
-  const thinkingMsg = addChatMessage('ai', '__thinking__');
-
-  let relevantContext = usePdfContext ? getRelevantContext(question) : '';
-  const systemPrompt = usePdfContext && pdfLoaded ? `You are a helpful assistant. You were developed by GOVIND KUMAR for Tata Motors. Based on the AC Machine troubleshooting manual, answer the question.\nDOCUMENT CONTEXT: ${relevantContext}\nQUESTION: ${question}` : `You are a helpful AI assistant for AC Machine maintenance. You were developed by GOVIND KUMAR for Tata Motors. Answer the question based on your general knowledge.\nQUESTION: ${question}`;
-
-  // Fetch with auto-retry on 429 + key rotation
-  const MAX_RETRIES = 6;
-  const MAX_KEY_RETRIES = GEMINI_API_KEYS.length;
-  let attempt = 0;
-  let keyAttempt = 0;
-  let answer = null;
-
-  while (attempt < MAX_RETRIES && keyAttempt < MAX_KEY_RETRIES) {
-    attempt++;
-    try {
-      const bbl = thinkingMsg.querySelector('.ai-bubble');
-      if (bbl) bbl.innerHTML = `<div style="color:var(--accent);font-size:10px">Key ${currentKeyIndex + 1}/${GEMINI_API_KEYS.length}...</div>`;
-
-      const response = await fetch(getAPIUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: systemPrompt }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
-        })
-      });
-
-      if (response.status === 429) {
-        keyCooldowns[currentKeyIndex] = Date.now() + 60000;
-        if (switchToNextKey()) {
-          keyAttempt++;
-          if (bbl) bbl.innerHTML = `<div style="color:var(--accent);font-size:10px">Rotating to Key ${currentKeyIndex + 1}...</div>`;
-          await new Promise(r => setTimeout(r, 1000));
-          continue;
-        } else {
-          const waitSec = Math.pow(2, attempt);
-          if (bbl) bbl.innerHTML = `<div style="color:var(--warn);font-size:10px">⏳ Busy — retrying in ${waitSec}s...</div>`;
-          await new Promise(r => setTimeout(r, waitSec * 1000));
-          continue;
-        }
-      }
-      if (!response.ok) throw new Error(`API Error: ${response.status}`);
-      const data = await response.json();
-      answer = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No answer received.';
-      break;
-    } catch (err) {
-      if (attempt >= MAX_RETRIES) {
-        console.error('Gemini Error:', err);
-        thinkingMsg.remove();
-        addChatMessage('ai', '⚠️ All API keys rate limited. Try again later.');
-        setAiStatus('ERROR', false);
-        isAiThinking = false;
-
-        sendBtn.disabled = false;
-        sendBtn.innerHTML = '<span id="aiSendIcon">➤</span>';
-        lastRequestTime = 0;
-        document.getElementById('aiQuestion').focus();
-        return;
-      }
-    }
-  }
-
-  thinkingMsg.remove();
-  if (answer) {
-    addChatMessage('ai', answer);
-    setCachedAnswer(question, answer);
-    setAiStatus('READY', false);
-  } else {
-    addChatMessage('ai', '⚠️ No response. Try again.');
-    setAiStatus('ERROR', false);
-  }
-  isAiThinking = false;
-
+  
+  await new Promise(r => setTimeout(r, 300));
+  
+  const results = localSearch(question);
+  addChatMessage('ai', results);
+  
+  setAiStatus('READY', false);
+  isSearching = false;
   sendBtn.disabled = false;
   sendBtn.innerHTML = '<span id="aiSendIcon">➤</span>';
   document.getElementById('aiQuestion').focus();
+}
+
+function updateKeyIndicator() {
+  const el = document.getElementById('apiKeyIndicator');
+  if (el) el.style.display = 'none';
+}
+
+function downloadPDF() {
+  const binary = atob(PDF_BASE64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'troubleshooting_manual.pdf';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function extractFaultsFromPDF() {
+  const faults = [];
+  const pageTexts = pdfPages.map(p => p.text);
+
+  pageTexts.forEach((text, pageIdx) => {
+    const lines = text.split('\n');
+    let currentFault = null;
+    let currentCauses = [];
+    let currentRemedies = [];
+
+    lines.forEach(line => {
+      line = line.trim();
+      if (!line) return;
+
+      const faultMatch = line.match(/(\d{4})\s+(OPS\s+FAULT|OPS\s+WARN|WARNING|FAULT)\s+BASE\s+UNIT/i);
+      if (faultMatch) {
+        if (currentFault) {
+          faults.push({
+            code: currentFault.code,
+            type: currentFault.type,
+            message: currentFault.message,
+            causes: [...currentCauses],
+            remedies: [...currentRemedies]
+          });
+        }
+        const code = faultMatch[1];
+        const type = line.toUpperCase().includes('FAULT') ? 'FAULT' : 'WARNING';
+        const message = line.replace(faultMatch[0], '').trim() || line;
+        currentFault = { code, type, message };
+        currentCauses = [];
+        currentRemedies = [];
+      } else if (line.includes('|')) {
+        const parts = line.split('|');
+        const leftSide = parts[0].trim();
+        const rightSide = parts.slice(1).join('|').trim();
+        
+        if (leftSide && !leftSide.startsWith('---') && !leftSide.startsWith('Page')) {
+          if (leftSide.startsWith('•') || leftSide.startsWith('-')) {
+            currentCauses.push(leftSide.replace(/^[•\-]\s*/, ''));
+          }
+        }
+        if (rightSide) {
+          if (rightSide.startsWith('•') || rightSide.startsWith('-') || rightSide.startsWith('→')) {
+            currentRemedies.push(rightSide.replace(/^[•\-\→]\s*/, ''));
+          }
+        }
+      } else if (currentFault) {
+        if (line.startsWith('•') || line.startsWith('-')) {
+          currentCauses.push(line.replace(/^[•\-]\s*/, ''));
+        } else if (line.startsWith('→')) {
+          currentRemedies.push(line.replace(/^[→]\s*/, ''));
+        }
+      }
+    });
+
+    if (currentFault) {
+      faults.push({
+        code: currentFault.code,
+        type: currentFault.type,
+        message: currentFault.message,
+        causes: [...currentCauses],
+        remedies: [...currentRemedies]
+      });
+    }
+  });
+
+  return faults;
+}
+
+function showAllPDFaults() {
+  if (!pdfLoaded) {
+    showToast('Loading PDF...', 'var(--warn)');
+    loadPDF().then(() => showAllPDFaults());
+    return;
+  }
+
+  const faults = extractFaultsFromPDF();
+  const chatArea = document.getElementById('aiChatArea');
+  const welcome = chatArea.querySelector('.ai-welcome');
+  if (welcome) welcome.remove();
+
+  let html = `<div class="pdf-faults-container">`;
+  html += `<div class="pdf-faults-header">📋 PDF FAULT CODES (${faults.length} found)</div>`;
+  
+  if (faults.length === 0) {
+    html += `<div class="pdf-faults-empty">No fault codes found. Check raw text below.</div>`;
+    html += `<button onclick="showRawPDFText()" style="background:var(--surface);color:var(--accent);border:1px solid var(--border);padding:8px 16px;border-radius:4px;cursor:pointer;margin-top:10px;">Show Raw PDF Text</button>`;
+  } else {
+    faults.forEach(f => {
+      html += `<div class="pdf-fault-card ${f.type === 'FAULT' ? 'type-fault' : 'type-warn'}">`;
+      html += `<div class="pdf-fault-header">`;
+      html += `<span class="pdf-fault-code">${f.code}</span>`;
+      html += `<span class="pdf-fault-type">${f.type}</span>`;
+      html += `<span class="pdf-fault-msg">${escapeHTML(f.message.substring(0, 60))}${f.message.length > 60 ? '...' : ''}</span>`;
+      html += `</div>`;
+      html += `<div class="pdf-fault-body">`;
+      if (f.causes.length) {
+        html += `<div class="pdf-fault-causes"><strong>Causes:</strong> ${f.causes.map(c => `• ${escapeHTML(c.substring(0, 80))}`).join('<br>')}</div>`;
+      }
+      if (f.remedies.length) {
+        html += `<div class="pdf-fault-remedies"><strong>Remedies:</strong> ${f.remedies.map(r => `→ ${escapeHTML(r.substring(0, 80))}`).join('<br>')}</div>`;
+      }
+      html += `</div>`;
+      html += `</div>`;
+    });
+  }
+  
+  html += `</div>`;
+  
+  addChatMessage('ai', html);
+}
+
+function showRawPDFText() {
+  const chatArea = document.getElementById('aiChatArea');
+  let html = `<div class="pdf-raw-container">`;
+  html += `<div class="pdf-faults-header">RAW PDF TEXT (Page 19 - Troubleshooting Page)</div>`;
+  
+  const page19 = pdfPages.find(p => p.page === 19);
+  if (page19) {
+    html += `<pre class="pdf-raw-text">${escapeHTML(page19.text)}</pre>`;
+  } else {
+    html += `<div style="color:var(--warn);">Page 19 not found. Showing first 3 pages:</div>`;
+    pdfPages.slice(0, 3).forEach(p => {
+      html += `<div style="margin-top:10px;color:var(--accent);">Page ${p.page}:</div>`;
+      html += `<pre class="pdf-raw-text">${escapeHTML(p.text.substring(0, 2000))}</pre>`;
+    });
+  }
+  
+  html += `</div>`;
+  addChatMessage('ai', html);
 }

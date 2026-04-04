@@ -105,13 +105,13 @@
       </div>
     </div> <!-- End of .dash-only -->
 
-    <!-- AI PDF ASSISTANT TAB -->
+    <!-- SEARCH ASSISTANT TAB -->
     <div class="ai-container ai-only">
       <div class="ai-header">
         <div class="ai-header-left">
-          <div class="ai-logo">🤖</div>
+          <div class="ai-logo">🔍</div>
           <div>
-            <h2>AI ASSISTANT</h2>
+            <h2>SEARCH ASSISTANT</h2>
             <p>AC Machine Troubleshooting Manual</p>
           </div>
         </div>
@@ -119,29 +119,28 @@
           <span class="ai-dot"></span>
           <span id="aiStatusText">IDLE</span>
         </div>
-        <span id="apiKeyIndicator" style="font-family:monospace;font-size:10px;color:var(--text2);letter-spacing:1px;display:flex;align-items:center;gap:4px;">KEY 1/2</span>
-        <button class="ai-load-btn" id="pdfToggleBtn" onclick="togglePdfContext()"
-          style="background: var(--warn); font-size: 11px; padding: 5px 10px;">📖 PDF: OFF</button>
+        <button class="ai-load-btn" onclick="showAllPDFaults()" style="background: var(--surface); font-size: 11px; padding: 5px 10px; border: 1px solid var(--border);">📋 All Faults</button>
+        <button class="ai-load-btn" onclick="downloadPDF()" style="background: var(--surface); font-size: 11px; padding: 5px 10px; border: 1px solid var(--border);">📥 PDF</button>
       </div>
 
       <div class="ai-chat-area" id="aiChatArea">
         <div class="ai-welcome">
-          <div class="ai-welcome-icon">🤖</div>
-          <div class="ai-welcome-title">ASK ME ANYTHING</div>
-          <div class="ai-welcome-sub">About AC machine Digital Troubleshooting.</div>
+          <div class="ai-welcome-icon">🔍</div>
+          <div class="ai-welcome-title">SEARCH FAULTS & MANUAL</div>
+          <div class="ai-welcome-sub">Search AC machine faults, codes, and PDF manual.</div>
           <div class="ai-suggestions">
-            <button class="ai-suggest-btn" onclick="useSuggestion(this)">Fault code 1805?</button>
+            <button class="ai-suggest-btn" onclick="useSuggestion(this)">Compressor not working</button>
+            <button class="ai-suggest-btn" onclick="useSuggestion(this)">Pressure warning</button>
             <button class="ai-suggest-btn" onclick="useSuggestion(this)">Safety precautions</button>
-            <button class="ai-suggest-btn" onclick="useSuggestion(this)">Reset warning</button>
           </div>
         </div>
       </div>
 
       <div class="ai-input-area">
         <div class="ai-input-wrap">
-          <input type="text" id="aiQuestion" placeholder="Ask about AC faults..."
-            onkeydown="if(event.key==='Enter') askAI()" />
-          <button class="ai-send-btn" id="aiSendBtn" onclick="askAI()">
+          <input type="text" id="aiQuestion" placeholder="Search faults or manual..."
+            onkeydown="if(event.key==='Enter') performSearch()" />
+          <button class="ai-send-btn" id="aiSendBtn" onclick="performSearch()">
             <span id="aiSendIcon">➤</span>
           </button>
         </div>
