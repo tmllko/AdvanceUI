@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AC Machine Digital Troubleshooting</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;800&display=swap"
+    rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore-compat.js"></script>
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+  <!-- LOADING -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <div class="loading-title" id="loadingTitle">CONNECTING...</div>
+      <div class="loading-sub" id="loadingSub">Reaching server, please wait</div>
+      <div class="loading-bar-wrap">
+        <div class="loading-bar" id="loadingBar"></div>
+      </div>
+      <div class="loading-tip" id="loadingTip"></div>
+    </div>
+  </div>
+
+  <div class="topstrip"></div>
+
+  <header>
+    <button class="hamburger-btn" onclick="toggleMenu()">☰</button>
+    <div class="header-left">
+      <div class="logo-box">TCF</div>
+      <div class="header-title">
+        <h1>Troubleshooting Action Plan</h1>
+        <p>Assembly Line 2 & 3 &nbsp;|&nbsp; Tata Motors</p>
+      </div>
+    </div>
+    <div class="header-meta">
+      <button class="lang-btn" id="langToggle" onclick="toggleLang()">A / अ</button>
+    </div>
+  </header>
+
+  <!-- SIDEBAR MENU -->
+  <div class="side-menu-overlay" id="sideMenuOverlay" onclick="toggleMenu()"></div>
+  <div class="side-menu" id="sideMenu">
+    <div class="side-menu-header">
+      NAVIGATION
+      <button class="side-menu-close" onclick="toggleMenu()">✕</button>
+    </div>
+    <button class="menu-item active" id="tab-dashboard" onclick="switchTab('dashboard')">
+      <span class="tab-icon">📊</span><span class="tab-text">Dashboard</span>
+    </button>
+    <button class="menu-item" id="tab-management" onclick="switchTab('management')">
+      <span class="tab-icon">⚙️</span><span class="tab-text">Admin Panel</span>
+    </button>
+    <button class="menu-item" id="tab-ai" onclick="switchTab('ai')">
+      <span class="tab-icon">🤖</span><span class="tab-text">Smart Assistant</span>
+    </button>
+    <button class="menu-item" id="tab-about" onclick="switchTab('about')">
+      <span class="tab-icon">ℹ️</span><span class="tab-text">About App</span>
+    </button>
+  </div>
+
+  <main>
+
+    <div class="dash-only">
+      <div class="stats-bar">
+        <div class="stat-card stat-all">
+          <div class="stat-icon">📋</div>
+          <div class="stat-info"><label>All Issues</label><strong id="statTotal">0</strong></div>
+        </div>
+        <div class="stat-card stat-fault">
+          <div class="stat-icon">🔴</div>
+          <div class="stat-info"><label>Faults</label><strong id="statFault">0</strong></div>
+        </div>
+        <div class="stat-card stat-warn">
+          <div class="stat-icon">🟡</div>
+          <div class="stat-info"><label>Warnings</label><strong id="statWarn">0</strong></div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" placeholder="Search faults, codes, or actions...">
+        </div>
+        <button class="filter-btn active" data-filter="ALL">ALL</button>
+        <button class="filter-btn" data-filter="FAULT">FAULT</button>
+        <button class="filter-btn" data-filter="WARNING">WARNING</button>
+        <button class="export-btn mana-only" onclick="exportCSV()">📥 Export Data</button>
+        <button class="add-btn mana-only" onclick="openModal()">+ Add New</button>
+      </div>
+
+      <div class="entries-list" id="entriesList"></div>
+      <div class="empty-state" id="emptyState">
+        <div class="big">⚙️</div>
+        <div>No matching issues found.</div>
+      </div>
+    </div> <!-- End of .dash-only -->
+
+    <!-- AI PDF ASSISTANT TAB -->
+    <div class="ai-container ai-only">
+      <div class="ai-header">
+        <div class="ai-header-left">
+          <div class="ai-logo">🤖</div>
+          <div>
+            <h2>AI ASSISTANT</h2>
+            <p>AC Machine Troubleshooting Manual</p>
+          </div>
+        </div>
+        <div class="ai-status" id="aiStatus">
+          <span class="ai-dot"></span>
+          <span id="aiStatusText">IDLE</span>
+        </div>
+        <span id="apiKeyIndicator" style="font-family:monospace;font-size:10px;color:var(--text2);letter-spacing:1px;display:flex;align-items:center;gap:4px;">KEY 1/2</span>
+        <button class="ai-load-btn" id="pdfToggleBtn" onclick="togglePdfContext()"
+          style="background: var(--warn); font-size: 11px; padding: 5px 10px;">📖 PDF: OFF</button>
+      </div>
+
+      <div class="ai-chat-area" id="aiChatArea">
+        <div class="ai-welcome">
+          <div class="ai-welcome-icon">🤖</div>
+          <div class="ai-welcome-title">ASK ME ANYTHING</div>
+          <div class="ai-welcome-sub">About AC machine Digital Troubleshooting.</div>
+          <div class="ai-suggestions">
+            <button class="ai-suggest-btn" onclick="useSuggestion(this)">Fault code 1805?</button>
+            <button class="ai-suggest-btn" onclick="useSuggestion(this)">Safety precautions</button>
+            <button class="ai-suggest-btn" onclick="useSuggestion(this)">Reset warning</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ai-input-area">
+        <div class="ai-input-wrap">
+          <input type="text" id="aiQuestion" placeholder="Ask about AC faults..."
+            onkeydown="if(event.key==='Enter') askAI()" />
+          <button class="ai-send-btn" id="aiSendBtn" onclick="askAI()">
+            <span id="aiSendIcon">➤</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="about-container about-only">
+      <h2>🏭 TATA MOTORS LUCKNOW CVBU</h2>
+      <p>This application is the official <strong>Failure Action Plan</strong> for the AC Machine. It helps operators and maintenance teams quickly find solutions to machine faults and warnings to keep production running smoothly.</p>
+
+      <div class="values-grid">
+        <div class="value-card">
+          <div class="v-icon">🚀</div>
+          <div class="v-text">BE BOLD</div>
+        </div>
+        <div class="value-card">
+          <div class="v-icon">🛡️</div>
+          <div class="v-text">OWN IT</div>
+        </div>
+        <div class="value-card">
+          <div class="v-icon">🤝</div>
+          <div class="v-text">SOLVE TOGETHER</div>
+        </div>
+        <div class="value-card">
+          <div class="v-icon">💙</div>
+          <div class="v-text">BE EMPATHETIC</div>
+        </div>
+      </div>
+
+      <div class="about-flex">
+        <div class="about-col">
+          <p class="about-label">SYSTEM DEVELOPER</p>
+          <p><strong>GOVIND KUMAR (DET)</strong><br>Maintenance Team<br>Tata Motors Lucknow Plant</p>
+        </div>
+        <div class="about-col">
+          <p class="about-label">INFRASTRUCTURE DETAILS</p>
+          <ul class="infra-list">
+            <li><span class="check">✓</span> <strong>Tech:</strong> Fast, serverless setup with real-time syncing</li>
+            <li><span class="check">✓</span> <strong>Security:</strong> Protected by plant-only access</li>
+            <li><span class="check">✓</span> <strong>Admin:</strong> Management tasks are locked by PIN</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <span>Govind Kumar &nbsp;▸&nbsp; <span class="footer-brand">TATA MOTORS</span></span>
+    <span id="footerCount">Loading...</span>
+  </footer>
+
+  <!-- MODAL -->
+  <div class="modal-overlay" id="modalOverlay" onclick="overlayClick(event)">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modalTitle">ADD NEW ENTRY</h2>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-note">
+          Type a reason or action step, then press <strong>Enter</strong> to instantly add a new line!
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Fault / Warning Code *</label>
+            <input type="text" id="fCode" placeholder="e.g. 1805">
+          </div>
+          <div class="form-row">
+            <label>Type *</label>
+            <select id="fType">
+              <option value="FAULT">FAULT</option>
+              <option value="WARNING">WARNING</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Title / Description *</label>
+          <input type="text" id="fTitle" placeholder="e.g. CONSOLE A AC - NO PRESSURE FOR PRESSURE TEST">
+        </div>
+        <div class="form-row">
+          <label>Why it happens</label>
+          <div id="fReasonsContainer" class="dynamic-list"></div>
+          <button type="button" class="add-row-btn" onclick="addDynamicRow('fReasonsContainer')">+ Add Reason</button>
+        </div>
+        <div class="form-row">
+          <label>How to fix</label>
+          <div id="fStepsContainer" class="dynamic-list"></div>
+          <button type="button" class="add-row-btn" onclick="addDynamicRow('fStepsContainer')">+ Add Step</button>
+        </div>
+        <div class="form-row">
+          <label>Safety Note (optional)</label>
+          <input type="text" id="fNote" placeholder="e.g. USE PROPER PPE AND SAFETY">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn-save" onclick="saveEntry()">Save Issue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTH MODAL -->
+  <div class="modal-overlay" id="authOverlay" onclick="if(event.target === this) closeAuth()">
+    <div class="modal" style="width: min(340px, 90vw);">
+      <div class="modal-header">
+        <h2 style="color: var(--fault);" id="authTitle">SECURITY CHECK</h2>
+        <button class="modal-close" onclick="closeAuth()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row" style="margin-bottom: 0;">
+          <label style="text-align: center; color: var(--fault);" id="authLabel">ENTER ADMIN KEY TO AUTHORIZE</label>
+          <input type="password" id="authKey" placeholder="••••••••"
+            style="text-align: center; letter-spacing: 4px; font-size: 18px; border-color: var(--border);"
+            onkeydown="if(event.key === 'Enter') submitAuth()">
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end; gap: 10px;">
+        <button class="btn-cancel" onclick="closeAuth()">Cancel</button>
+        <button class="btn-del" onclick="submitAuth()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="js/pdf-data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+
+</html>
